@@ -331,7 +331,7 @@ Window::Window(const char* name) {
   glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
   glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
   glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-  // glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+  glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
 
   printf("Monitor size: %dx%d\n", mode->width, mode->height);
 
@@ -350,8 +350,8 @@ Window::Window(const char* name) {
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glEnable(GL_MULTISAMPLE);
-  glClearColor(0, 0, 0, 1);
-  glEnable(GL_DEPTH_TEST);
+  glClearColor(0.1, 0.1, 0.1, 1);
+  // glEnable(GL_DEPTH_TEST);
   // glEnable(GL_CULL_FACE);
   // glFrontFace(GL_CW);
   glfwSwapInterval(0);
@@ -383,13 +383,21 @@ bool Window::poll() {
 
   mnorm = 2.f * (mpos / sz) - vec2{1.f, 1.f};
   mnorm.y *= -1;
+  if (mnorm.x < -1)
+    mnorm.x = -1;
+  if (mnorm.x > +1)
+    mnorm.x = +1;
+  if (mnorm.y < -1)
+    mnorm.y = -1;
+  if (mnorm.y > +1)
+    mnorm.y = +1;
 
   {
     float tmp = glfwGetTime();
     dt = tmp - time;
     time = tmp;
   }
-  
+
   if (get_key(Key::LeftControl)) {
     if (get_key(Key::_0))
       switch_to_monitor(0);

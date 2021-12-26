@@ -1,8 +1,8 @@
-R"(#version 450
+R"(#version 330
 
-uniform vec3 col;
+uniform vec4 col;
 out vec4 out_color;
 
 void main() {
-  out_color = vec4(col,1);
+  out_color = col;
 })"

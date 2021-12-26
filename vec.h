@@ -98,7 +98,14 @@ struct Seq0<-1, t...> {
     }
 
     static constexpr Scalar dot(vt l, vt r) { return hadd(l * r); }
+
     static constexpr Scalar hadd(vt v) { return (v[t] + ...); }
+
+    template <class F, class Re>
+    static constexpr auto fold(F f, Re i, vt v) {
+      return ((i = f(i, v[t])), ...);
+    }
+
     static std::ostream& stream(std::ostream& s, vt v) {
       ((v[t] = (fabs(v[t]) < 0.00001f ? 0.f : v[t])), ...);
       return ((s << v[t] << ' '), ...) << "\b\n";
@@ -384,6 +391,11 @@ Scalar len(vec<Scalar, n> v) {
 template <class Scalar, int n>
 Scalar hadd(vec<Scalar, n> v) {
   return Seq<Scalar, n>::hadd(v);
+}
+
+template <class F, class Re, class Scalar, int n>
+Re fold(F&& f, Re i, vec<Scalar, n> v) {
+  return Seq<Scalar, n>::template fold<F>(f, i, v);
 }
 
 template <class Scalar, int n>

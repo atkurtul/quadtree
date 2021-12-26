@@ -1,4 +1,4 @@
-R"(#version 450
+R"(#version 330
 
 in  vec2 vert;
 
