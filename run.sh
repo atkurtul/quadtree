@@ -4,6 +4,6 @@
 mkdir -p build
 cd build
 cmake .. -GNinja
-cmake --build . --config Release
+cmake --build . --config Debug
 cd ..
 ./build/quad.exe

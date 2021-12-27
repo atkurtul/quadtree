@@ -6,6 +6,7 @@
 #include <optional>
 #include <unordered_set>
 #include <variant>
+#include <vector>
 
 #include "gfx.h"
 
@@ -14,181 +15,208 @@
 static Mesh mesh_cross, mesh_quad;
 static Shader shader;
 
-template <class T>
 struct TreeNode {
-  vec2 pos;
-  T data;
-
-  void draw() {
+  vec2 pos = {0, 0};
+  vec2 vel = {0, 0};
+  vec2 draw(f32 dt) {
     shader.set_uniform("pos", pos);
     shader.set_uniform("sz", 0.02f * vec2{0.09, 0.16});
     shader.set_uniform("col", vec4{0.8, 0.2, 0.7, 1});
     mesh_quad.draw();
+    return pos += vel * dt;
   }
 };
 
-template <class T>
-struct QuadTree;
+struct Range {
+  vec2 lo, hi;
+  bool contains(Range r) const {
+    return lo.x < r.lo.x && lo.y < r.lo.y && hi.x > r.hi.x && hi.y > r.hi.y;
+  }
 
-template <class T>
-inline size_t hash_combine(size_t seed, T const& v) {
-  return seed ^ (std::hash<T>(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
-}
-
-template <class H, class... T>
-inline size_t hash_combine(size_t seed, H const& h, T const&... t) {
-  return hash_combine(hash_combine(seed, h), t...);
-}
-
-template <class T, int n>
-struct std::hash<vec<T, n>> {
-  size_t operator()(vec<T, n> v) const noexcept {
-    return fold([](size_t a, T b) { return hash_combine(a, b); }, size_t(n),
-                vec3{1, 2, 3});
+  bool overlaps(Range r) const {
+    return lo.x > r.lo.x && lo.x < r.hi.x || hi.x > r.lo.x && hi.x < r.hi.x ||
+           lo.y > r.lo.y && lo.y < r.hi.y || hi.y > r.lo.y && hi.y < r.hi.y;
   }
 };
 
-template <class T>
-struct std::hash<TreeNode<T>> {
-  size_t operator()(const TreeNode<T>& q) const noexcept {
-    return hash_combine(0, q.pos, q.dat);
+struct Rect {
+  vec2 pos = {0, 0};
+  vec2 size = {0, 0};
+
+  Range range() const { return {pos - size * 0.5f, pos + size * 0.5f}; }
+
+  bool contains(Rect r) const { return range().contains(r.range()); }
+  bool contains(vec2 v) const { return contains(Rect{v, v}); }
+  bool overlaps(Rect r) const { return range().overlaps(r.range()); }
+
+  void divide(Rect r[4]) const {
+    vec2 sz = size * 0.5f;
+    r[0] = {pos + sz, sz};
+    r[1] = {pos + vec2{-sz.x, +sz.y}, sz};
+    r[2] = {pos + vec2{-sz.x, -sz.y}, sz};
+    r[3] = {pos + vec2{+sz.x, -sz.y}, sz};
   }
 };
 
-template <class T>
-struct std::hash<QuadTree<T>> {
-  size_t operator()(const QuadTree<T>& q) const noexcept {
-    return hash_combine(0, q.pos, q.dat, q.children);
-  }
-};
-
-template <class T>
 struct QuadTree {
-  vec2 pos;
-  vec2 size;
-  QuadTree<T>* parent;
+  Rect rect;
+  QuadTree* parent;
   std::variant<std::monostate,
-               std::array<std::unique_ptr<QuadTree<T>>, 4>,
-               TreeNode<T>>
+               std::array<std::unique_ptr<QuadTree>, 4>,
+               TreeNode>
       children;
 
-  QuadTree(QuadTree<T>* parent = 0, vec2 pos = {}, vec2 size = {1, 1})
-      : parent(parent), pos(pos), size(size), children(std::monostate{}) {}
+  QuadTree(QuadTree* parent = 0, Rect rect = {{0, 0}, {2, 2}})
+      : parent(parent), rect(rect), children(std::monostate{}) {}
 
   bool is_split() {
-    return std::holds_alternative<std::array<std::unique_ptr<QuadTree<T>>, 4>>(
+    return std::holds_alternative<std::array<std::unique_ptr<QuadTree>, 4>>(
         children);
   }
-  bool is_leaf() { return std::holds_alternative<TreeNode<T>>(children); }
+
+  bool is_leaf() { return std::holds_alternative<TreeNode>(children); }
   bool is_none() { return std::holds_alternative<std::monostate>(children); }
 
-  TreeNode<T>* get_leaf() {
+  TreeNode* get_leaf() {
     if (is_leaf()) {
-      return &std::get<TreeNode<T>>(children);
+      return &std::get<TreeNode>(children);
     }
     return 0;
   }
 
-  std::array<std::unique_ptr<QuadTree<T>>, 4>* get_split() {
+  std::array<std::unique_ptr<QuadTree>, 4>* get_split() {
     if (is_split()) {
-      return &std::get<std::array<std::unique_ptr<QuadTree<T>>, 4>>(children);
+      return &std::get<std::array<std::unique_ptr<QuadTree>, 4>>(children);
     }
     return 0;
   }
 
   int get_quadrant(vec2 v) {
-    int x = v.x < pos.x;
-    int y = v.y < pos.y;
+    int x = v.x < rect.pos.x;
+    int y = v.y < rect.pos.y;
     int q = (x ^ y) + 2 * y;
     if (!(q < 4 && q >= 0)) {
-      printf("%d\n", q);
       assert(false);
     }
     return q;
   }
 
-  void erase() {
-    children = std::monostate{};
-    if (!parent)
-      return;
-
-    bool has_children = false;
-    for (auto& s : *parent->get_split())
-      has_children |= !s->is_none();
-    if (!has_children)
-      parent->erase();
+  bool has_children() {
+    bool re = false;
+    if (auto c = get_split())
+      for (auto& c : *c)
+        re |= !c->is_none();
+    return re;
   }
 
-  void find(vec2 p, vec2 s, std::unordered_set<QuadTree<T>*>& collection) {
-    if (is_none()) {
+  void erase() {
+    children = std::monostate{};
+    if (parent && !parent->has_children())
+      parent->erase();
+    return;
+  }
+
+  void collect(std::unordered_set<QuadTree*>& collection, int& counter) {
+    counter++;
+    if (auto c = get_leaf()) {
+      collection.insert(this);
+      return;
+    }
+
+    if (auto c = get_split())
+      for (auto& c : *c)
+        c->collect(collection, counter);
+  }
+
+  void find(Rect r, std::unordered_set<QuadTree*>& collection, int& counter) {
+    counter++;
+    if (is_none())
+      return;
+
+    if (r.contains(rect)) {
+      collect(collection, counter);
+      return;
+    }
+
+    if (!r.overlaps(rect)) {
       return;
     }
 
     if (auto c = get_leaf()) {
-      if (c->pos.x <= p.x + s.x && c->pos.x >= p.x - s.x &&
-          c->pos.y <= p.y + s.y && c->pos.y >= p.y - s.y) {
+      if (r.contains(c->pos))
         collection.insert(this);
-      }
       return;
     }
 
     for (auto& c : *get_split())
-      c->find(p, s, collection);
+      c->find(r, collection, counter);
   }
 
-  bool insert(T data, vec2 v) {
+  int num() {
+    int re = 1;
+    if (auto c = get_split())
+      for (auto& c : *c)
+        re += c->num();
+    return re;
+  }
+
+  bool insert(TreeNode v) {
     if (auto c = get_split()) {
-      return (*c)[get_quadrant(v)]->insert(data, v);
+      return (*c)[get_quadrant(v.pos)]->insert(v);
     }
 
     if (auto c = get_leaf()) {
-      vec2 sz = size * 0.5f;
-      vec2 q0 = pos + sz;
-      vec2 q1 = pos + vec2{-sz.x, +sz.y};
-      vec2 q2 = pos + vec2{-sz.x, -sz.y};
-      vec2 q3 = pos + vec2{+sz.x, -sz.y};
+      auto node = *c;
 
-      auto node = std::move(*c);
-      if (len(node.pos - v) < 0.001f) {
-        return true;
-      }
+      if (len(node.pos - v.pos) < 0.00001f)
+        return false;
+      
+      Rect r[4];
+      rect.divide(r);
+      children = std::array<std::unique_ptr<QuadTree>, 4>{
+          std::make_unique<QuadTree>(this, r[0]),
+          std::make_unique<QuadTree>(this, r[1]),
+          std::make_unique<QuadTree>(this, r[2]),
+          std::make_unique<QuadTree>(this, r[3])};
 
-      children = std::array<std::unique_ptr<QuadTree<T>>, 4>{
-          std::make_unique<QuadTree<T>>(this, q0, sz),
-          std::make_unique<QuadTree<T>>(this, q1, sz),
-          std::make_unique<QuadTree<T>>(this, q2, sz),
-          std::make_unique<QuadTree<T>>(this, q3, sz)};
-
-      return insert(std::move(node.data), node.pos) &&
-             insert(std::move(data), v);
+      insert(node);
+      insert(v);
+      return true;
     }
 
-    children = TreeNode<T>{v, std::move(data)};
+    children = v;
     return true;
   }
 
-  void draw() {
+  void draw(f32 dt, std::vector<TreeNode>& reinsert) {
     if (is_none()) {
       return;
     }
 
-    if (is_split()) {
-      shader.set_uniform("pos", pos);
-      shader.set_uniform("sz", size);
+    if (auto c = get_split()) {
+      if (!has_children()) {
+        children = std::monostate{};
+        return;
+      }
+      shader.set_uniform("pos", rect.pos);
+      shader.set_uniform("sz", rect.size);
       shader.set_uniform("col", vec4{1, 1, 1, 1});
       mesh_cross.draw();
-      for (auto& q :
-           std::get<std::array<std::unique_ptr<QuadTree<T>>, 4>>(children)) {
-        q->draw();
-      }
-    } else {
-      std::get<TreeNode<T>>(children).draw();
+
+      for (auto& c : *c)
+        c->draw(dt, reinsert);
+      return;
+    }
+
+    if (!rect.contains(get_leaf()->draw(dt))) {
+      reinsert.push_back(*get_leaf());
+      children = std::monostate{};
     }
   }
 };
 
 int main() {
-  QuadTree<int>* tree = new QuadTree<int>{};
+  QuadTree* tree = new QuadTree{};
 
   Window win("quadtree");
 
@@ -212,21 +240,28 @@ int main() {
     shader.bind();
     if (win.get_mouse_button(1)) {
       shader.set_uniform("pos", win.mnorm);
-      shader.set_uniform("sz", vec2{1.f, 1.f} / 8.f);
+      shader.set_uniform("sz", 0.5f * vec2{1.f, 1.f} / 8.f);
       shader.set_uniform("col", vec4{0.2, 0.6, 0.7, 0.1});
       mesh_quad.draw();
-      std::unordered_set<QuadTree<int>*> nodes;
-      tree->find(win.mnorm, vec2{1.f, 1.f} / 8.f, nodes);
-      for (auto n : nodes) {
-        n->erase();
-      }
+      int counter = 0;
+
+      std::unordered_set<QuadTree*> nodes;
+      tree->find({win.mnorm, vec2{1.f, 1.f} / 8.f}, nodes, counter);
+      printf("Took %d iterations with %d nodes\n", counter, tree->num());
+      // for (auto n : nodes) {
+      //   n->erase();
+      // }
     }
 
-    if (t > 0.01 && win.get_mouse_button(0)) {
+    if (t > 0.1 && win.get_mouse_button(0)) {
       t = 0;
-      assert(tree->insert(0, win.mnorm));
+      tree->insert({win.mnorm, win.mnorm * 0.02f});
     }
 
-    tree->draw();
+    std::vector<TreeNode> reinsert;
+    tree->draw(win.dt, reinsert);
+    for (auto node : reinsert)
+      if (!tree->rect.contains(node.pos))
+        tree->insert(node);
   }
 }

@@ -360,6 +360,8 @@ Window::Window(const char* name) {
 
   glfwSetWindowUserPointer(win, this);
   glfwSetScrollCallback(win, wheel_callback);
+
+  time = glfwGetTime();
 }
 
 Window::~Window() {
@@ -377,12 +379,16 @@ bool Window::poll() {
   vec2 tmp = {(f32)x, (f32)y};
   mdelta = tmp - mpos;
   mpos = tmp;
+
   ivec2 size = get_size();
   sz.x = size.x;
   sz.y = size.y;
 
+  mdelta.y = -mdelta.y;
+
   mnorm = 2.f * (mpos / sz) - vec2{1.f, 1.f};
   mnorm.y *= -1;
+
   if (mnorm.x < -1)
     mnorm.x = -1;
   if (mnorm.x > +1)
