@@ -15,6 +15,8 @@
 
 using namespace std;
 
+constexpr f32 LO = 1.f / f32(1 << 16);
+
 static Mesh mesh_cross, mesh_quad;
 static Shader shader;
 
@@ -22,16 +24,11 @@ struct TreeNode {
   vec2 pos = {0, 0};
   vec2 vel = {0, 0};
 
-  void update(f32 dt) {
-    pos += vel * dt;
-    const f32 v = len(vel);
-    if (v > 0.01f)
-      vel = norm(vel) * v * 0.999f;
-  }
+  void update(f32 dt) { pos += vel * dt; }
 
   void draw() {
     shader.set_uniform("pos", pos);
-    shader.set_uniform("sz", 0.2f * vec2{0.009f, 0.016f});
+    shader.set_uniform("sz", vec2{LO, LO} * 0.25f);
     shader.set_uniform("col", vec4{0.8, 0.2, 0.7, 1});
     mesh_quad.draw();
   }
@@ -75,7 +72,7 @@ struct QuadTree {
 
   variant<int, TreeNode, array<unique_ptr<QuadTree>, 4>> div;
 
-  QuadTree(QuadTree* parent = 0, Rect rect = {{0, 0}, {2, 32.f / 9.f}})
+  QuadTree(QuadTree* parent = 0, Rect rect = {{0, 0}, {2048.f, 2048.f}})
       : parent(parent), rect(rect), div(0) {}
 
   TreeNode* node() { return get_if<TreeNode>(&div); }
@@ -90,7 +87,7 @@ struct QuadTree {
     }
 
     if (auto c = node()) {
-      if (rect.s.x < 1.f / 512.f) {
+      if (rect.s.x < 1.f / f32(1 << 16)) {
         return;
       }
       Rect r[4];
@@ -269,6 +266,11 @@ int main() {
   }
 
   vector<TreeNode> front_buf;
+
+  f32 rot = 0;
+  vec2 cam_pos = {};
+  f32 zoom = 0;
+
   while (win.poll()) {
     vector<TreeNode> back_buf = std::move(front_buf);
 
@@ -278,18 +280,37 @@ int main() {
       tree = new QuadTree{};
     }
 
+    const f32 dt = win.dt * (1 + win.get_key(Key::LeftShift) * 4);
+
+    zoom += (win.get_key(Key::Q) - win.get_key(Key::E)) * dt;
+
+    vec2 p = vec2{f32(win.get_key(Key::D) - win.get_key(Key::A)),
+                  f32(win.get_key(Key::W) - win.get_key(Key::S))} *
+             win.dt;
+
+    rot += win.wheel * win.dt * 20;
+    float c = cosf(rot);
+    float s = sinf(rot);
+    mat2 mrot = mat2{vec2{c, s}, vec2{-s, c}};
+    f32 z = exp(zoom);
+    cam_pos += z * (p * mrot);
+
+    vec2 mnorm = cam_pos + z * (win.mnorm * mrot);
+
+    shader.set_uniform("mrot", mrot);
+    shader.set_uniform("cam_pos", cam_pos);
+    shader.set_uniform("zoom", z);
+
     if (win.get_mouse_button(1)) {
-      const f32 sz = 1.f / 16.f;
-      const f32 ar = 16.f / 9.f;
-      shader.set_uniform("pos", win.mnorm);
-      shader.set_uniform("sz", vec2{1, ar} * sz * 0.5f);
+      const f32 sz = z / 16.f;
+      shader.set_uniform("pos", mnorm);
+      shader.set_uniform("sz", vec2{sz, sz} * 0.5f);
       shader.set_uniform("col", vec4{0.2, 0.6, 1.f, 0.4});
       mesh_quad.draw();
-
       vector<QuadTree*> v;
       int counter = 0;
 
-      tree->find(Rect{win.mnorm, vec2{1, ar} * sz}, v, counter);
+      tree->find(Rect{mnorm, vec2{sz, sz}}, v, counter);
 
       for (auto& q : v) {
         q->erase();
@@ -297,8 +318,9 @@ int main() {
     }
 
     if (win.get_mouse_button(0)) {
-      for (int i = 1000; i; --i)
-        tree->insert({win.mnorm, win.mdelta * 0.0125f}, back_buf);
+      
+      //tree->insert({mnorm, win.mdelta * 0.0125f}, back_buf);
+      tree->insert({mnorm, {}}, back_buf);
     }
 
     tree->draw();

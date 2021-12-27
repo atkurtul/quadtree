@@ -331,7 +331,7 @@ Window::Window(const char* name) {
   glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
   glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
   glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-  glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+  // glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
 
   printf("Monitor size: %dx%d\n", mode->width, mode->height);
 
