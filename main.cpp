@@ -31,7 +31,7 @@ struct TreeNode {
 
   void draw() {
     shader.set_uniform("pos", pos);
-    shader.set_uniform("sz", vec2{0.0009f, 0.0016f});
+    shader.set_uniform("sz", 0.2f * vec2{0.009f, 0.016f});
     shader.set_uniform("col", vec4{0.8, 0.2, 0.7, 1});
     mesh_quad.draw();
   }
@@ -84,19 +84,17 @@ struct QuadTree {
     return get_if<array<unique_ptr<QuadTree>, 4>>(&div);
   }
 
-  void insert(TreeNode v) {
+  void insert(TreeNode v, vector<TreeNode>& buf) {
     if (!rect.contains(v.pos)) {
-      // cout << rect.pos << rect.s << " Does not contain" << v.pos;
       return;
     }
 
     if (auto c = node()) {
-      if (rect.s.x < 1.f / 512.f)
+      if (rect.s.x < 1.f / 512.f) {
         return;
-
+      }
       Rect r[4];
       rect.divide(r);
-
       array<unique_ptr<QuadTree>, 4> tmp = {
           make_unique<QuadTree>(this, r[0]),
           make_unique<QuadTree>(this, r[1]),
@@ -104,14 +102,14 @@ struct QuadTree {
           make_unique<QuadTree>(this, r[3]),
       };
 
-      tmp[get_quadrant(c->pos)]->insert(*c);
-      tmp[get_quadrant(v.pos)]->insert(v);
+      tmp[get_quadrant(c->pos)]->insert(*c, buf);
+      tmp[get_quadrant(v.pos)]->insert(v, buf);
       div = std::move(tmp);
       return;
     }
 
     if (auto c = split()) {
-      (*c)[get_quadrant(v.pos)]->insert(v);
+      (*c)[get_quadrant(v.pos)]->insert(v, buf);
       return;
     }
 
@@ -173,6 +171,7 @@ struct QuadTree {
     if (parent)
       parent->erase_up();
   }
+
   void update(f32 dt, vector<TreeNode>& v) {
     if (auto c = split()) {
       for (auto& c : *c)
@@ -214,7 +213,19 @@ struct QuadTree {
         c->collect(collection);
   }
 
-  void find(Rect r, vector<QuadTree*>& collection) {
+  int size() {
+    int r = 1;
+    if (auto c = split()) {
+      for (auto& c : *c)
+        r += c->size();
+    }
+
+    return r;
+  }
+
+  void find(Rect r, vector<QuadTree*>& collection, int& counter) {
+    counter++;
+
     if (is_none())
       return;
 
@@ -234,7 +245,7 @@ struct QuadTree {
     }
 
     for (auto& c : *split())
-      c->find(r, collection);
+      c->find(r, collection, counter);
   }
 };
 
@@ -257,8 +268,15 @@ int main() {
     mesh_quad.create(u, sizeof u, 4, &layout, 1, Primitive::Quads);
   }
 
+  vector<TreeNode> front_buf;
   while (win.poll()) {
+    vector<TreeNode> back_buf = std::move(front_buf);
+
     shader.bind();
+    if (win.get_mouse_button(2)) {
+      delete tree;
+      tree = new QuadTree{};
+    }
 
     if (win.get_mouse_button(1)) {
       const f32 sz = 1.f / 16.f;
@@ -269,7 +287,9 @@ int main() {
       mesh_quad.draw();
 
       vector<QuadTree*> v;
-      tree->find(Rect{win.mnorm, vec2{1, ar} * sz}, v);
+      int counter = 0;
+
+      tree->find(Rect{win.mnorm, vec2{1, ar} * sz}, v, counter);
 
       for (auto& q : v) {
         q->erase();
@@ -277,17 +297,14 @@ int main() {
     }
 
     if (win.get_mouse_button(0)) {
-      tree->insert({win.mnorm, win.mdelta * 0.125f});
+      for (int i = 1000; i; --i)
+        tree->insert({win.mnorm, win.mdelta * 0.0125f}, back_buf);
     }
 
     tree->draw();
-
-    vector<TreeNode> rv;
-
-    tree->update(win.dt, rv);
-    for (auto& c : rv)
-      tree->insert(c);
-
+    tree->update(win.dt, back_buf);
+    for (auto& c : back_buf)
+      tree->insert(c, front_buf);
     tree->erase_down();
   }
 }
